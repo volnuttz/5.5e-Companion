@@ -491,7 +491,20 @@ app.get('/join/:dmUsername', (req, res) => {
 console.log(`DATABASE_URL: ${process.env.DATABASE_URL ? 'set' : 'NOT SET'}`);
 console.log(`PORT: ${PORT}`);
 
-app.listen(PORT, '0.0.0.0', () => {
+process.on('SIGTERM', () => {
+  console.log('Received SIGTERM - shutting down');
+  process.exit(0);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled rejection:', err);
+});
+
+const server = app.listen(PORT, '0.0.0.0', () => {
   const ip = getLocalIP();
   console.log(`DnD App running at:`);
   console.log(`  Local:   http://localhost:${PORT}`);
