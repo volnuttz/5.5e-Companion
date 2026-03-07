@@ -67,6 +67,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadCharacters();
   checkExistingSession();
   await Promise.all([loadSpellsDB(), loadFeaturesDB(), loadEquipmentDB(), loadMonstersDB()]);
+  await loadBattlefield();
 
   document.getElementById('btn-new-session').addEventListener('click', createSession);
   document.getElementById('btn-show-qr').addEventListener('click', showQR);
@@ -81,9 +82,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('f-level').addEventListener('input', updateSkillModifiers);
 
-  // Feature search
+  // Auto-set HP when class changes and level is 1
+  document.getElementById('f-class').addEventListener('change', autoSetHP);
+  document.getElementById('f-CON').addEventListener('input', autoSetHP);
+
+  // Feature search — also refresh when class/species/level change
   document.getElementById('feature-search').addEventListener('input', filterFeatures);
   document.getElementById('feature-source-filter').addEventListener('change', filterFeatures);
+  document.getElementById('f-class').addEventListener('change', filterFeatures);
+  document.getElementById('f-species').addEventListener('change', filterFeatures);
+  document.getElementById('f-level').addEventListener('input', filterFeatures);
 
   // DM page tabs
   document.querySelectorAll('.tabs .tab').forEach(tab => {
@@ -126,6 +134,32 @@ function populateDropdowns() {
   const speciesSelect = document.getElementById('f-species');
   speciesSelect.innerHTML = '<option value="">Select species...</option>' +
     SPECIES.map(s => `<option value="${s}">${s}</option>`).join('');
+
+  const bgSelect = document.getElementById('f-background');
+  bgSelect.innerHTML = '<option value="">Select background...</option>' +
+    BACKGROUNDS.map(b => `<option value="${b}">${b}</option>`).join('') +
+    '<option value="__custom__">+ Add Custom</option>';
+  bgSelect.addEventListener('change', () => {
+    const customInput = document.getElementById('f-background-custom');
+    if (bgSelect.value === '__custom__') {
+      customInput.style.display = '';
+      customInput.focus();
+    } else {
+      customInput.style.display = 'none';
+      customInput.value = '';
+    }
+  });
+}
+
+// --- Auto HP for level 1 ---
+function autoSetHP() {
+  const level = parseInt(document.getElementById('f-level').value) || 1;
+  if (level !== 1) return;
+  const cls = document.getElementById('f-class').value;
+  if (!cls || !HIT_DIE[cls]) return;
+  const conScore = parseInt(document.getElementById('f-CON').value) || 10;
+  const conMod = Math.floor((conScore - 10) / 2);
+  document.getElementById('f-hp').value = Math.max(1, HIT_DIE[cls] + conMod);
 }
 
 // --- Features DB ---
@@ -170,10 +204,17 @@ async function loadFeaturesDB() {
         name: f.name,
         description: f.description,
         source: 'class',
-        sourceDetail: `${className} (lvl ${f.level})`
+        sourceDetail: `${className} (lvl ${f.level})`,
+        _className: className,
+        _level: f.level
       });
     });
   }
+
+  // Species traits — tag with species name
+  allFeatures.forEach(f => {
+    if (f.source === 'species') f._speciesName = f.sourceDetail;
+  });
 }
 
 function filterFeatures() {
@@ -181,30 +222,48 @@ function filterFeatures() {
   const sourceFilter = document.getElementById('feature-source-filter').value;
   const resultsEl = document.getElementById('feature-results');
 
-  if (!query && !sourceFilter) {
+  const charClass = document.getElementById('f-class').value;
+  const charSpecies = document.getElementById('f-species').value;
+  const charLevel = parseInt(document.getElementById('f-level').value) || 1;
+
+  // If no search and no filter, auto-show features matching current class/species/level
+  if (!query && !sourceFilter && !charClass && !charSpecies) {
     resultsEl.style.display = 'none';
     return;
   }
 
-  // Auto-filter by class/species if character form has values
-  const charClass = document.getElementById('f-class').value;
-  const charSpecies = document.getElementById('f-species').value;
-
   let filtered = allFeatures.filter(f => {
-    if (query && !f.name.toLowerCase().includes(query) && !f.description.toLowerCase().includes(query)) return false;
-    if (sourceFilter && f.source !== sourceFilter) return false;
+    // Exclude already selected
     if (selectedFeatures.find(s => s.name === f.name && s.sourceDetail === f.sourceDetail)) return false;
+    // Text search
+    if (query && !f.name.toLowerCase().includes(query) && !f.description.toLowerCase().includes(query)) return false;
+    // Source filter
+    if (sourceFilter && f.source !== sourceFilter) return false;
+
+    // When no text search, auto-filter to relevant features only
+    if (!query) {
+      if (f.source === 'class') {
+        return f._className === charClass && f._level <= charLevel;
+      }
+      if (f.source === 'species') {
+        return f._speciesName === charSpecies;
+      }
+      // Feats always show (they're general)
+      return f.source === 'feat';
+    }
     return true;
   });
 
-  // Sort: matching class/species first
+  // Sort: matching class/species first, then by level
   filtered.sort((a, b) => {
-    const aRelevant = (a.source === 'class' && a.sourceDetail.startsWith(charClass)) ||
-                      (a.source === 'species' && a.sourceDetail === charSpecies);
-    const bRelevant = (b.source === 'class' && b.sourceDetail.startsWith(charClass)) ||
-                      (b.source === 'species' && b.sourceDetail === charSpecies);
-    if (aRelevant && !bRelevant) return -1;
-    if (!aRelevant && bRelevant) return 1;
+    const aMatch = (a.source === 'class' && a._className === charClass) ||
+                   (a.source === 'species' && a._speciesName === charSpecies);
+    const bMatch = (b.source === 'class' && b._className === charClass) ||
+                   (b.source === 'species' && b._speciesName === charSpecies);
+    if (aMatch && !bMatch) return -1;
+    if (!aMatch && bMatch) return 1;
+    // Within class features, sort by level
+    if (a.source === 'class' && b.source === 'class') return (a._level || 0) - (b._level || 0);
     return 0;
   });
 
@@ -243,13 +302,37 @@ function removeFeature(idx) {
   filterFeatures();
 }
 
+function updateCustomFeature(idx, input) {
+  selectedFeatures[idx].name = input.value.trim();
+}
+function updateCustomFeatureDesc(idx, input) {
+  selectedFeatures[idx].description = input.value.trim();
+}
+
+function addCustomFeature() {
+  selectedFeatures.push({ name: '', description: '', source: 'custom', sourceDetail: 'Custom', _editing: true });
+  renderSelectedFeatures();
+  // Focus the new name input
+  const inputs = document.querySelectorAll('#features-selected .feat-name');
+  if (inputs.length) inputs[inputs.length - 1].focus();
+}
+
 function renderSelectedFeatures() {
   const container = document.getElementById('features-selected');
   if (selectedFeatures.length === 0) {
     container.innerHTML = '';
     return;
   }
-  container.innerHTML = selectedFeatures.map((f, i) => `
+  container.innerHTML = selectedFeatures.map((f, i) => {
+    if (f._editing) {
+      return `
+    <div class="list-item" style="flex-wrap:wrap;padding:8px 12px;">
+      <div class="form-group" style="flex:1;"><label>Name</label><input type="text" class="feat-name" value="${esc(f.name)}" onchange="updateCustomFeature(${i}, this)" placeholder="Feature name"></div>
+      <div class="form-group" style="flex:2;"><label>Description</label><input type="text" class="feat-desc" value="${esc(f.description)}" onchange="updateCustomFeatureDesc(${i}, this)" placeholder="Description (optional)"></div>
+      <button type="button" class="remove-item" onclick="removeFeature(${i})">&times;</button>
+    </div>`;
+    }
+    return `
     <div class="list-item" style="flex-wrap:nowrap;align-items:center;padding:8px 12px;">
       <div style="flex:1;">
         <strong>${esc(f.name)}</strong>
@@ -257,8 +340,8 @@ function renderSelectedFeatures() {
         <div style="font-size:0.85rem;color:var(--text-muted);margin-top:2px;">${esc(f.description)}</div>
       </div>
       <button type="button" class="remove-item" onclick="removeFeature(${i})">&times;</button>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 // --- Spells DB ---
@@ -321,6 +404,40 @@ function removeSpell(name) {
   filterSpells();
 }
 
+function removeSpellByIndex(idx) {
+  selectedSpells.splice(idx, 1);
+  renderSelectedSpells();
+  filterSpells();
+}
+
+function addCustomSpell() {
+  selectedSpells.push({
+    name: '',
+    level: 0,
+    school: 'Custom',
+    description: '',
+    actionType: '',
+    castingTime: '',
+    range: '',
+    components: '',
+    concentration: false,
+    ritual: false,
+    duration: '',
+    _editing: true
+  });
+  renderSelectedSpells();
+  const inputs = document.querySelectorAll('#spells-selected .spell-name');
+  if (inputs.length) inputs[inputs.length - 1].focus();
+}
+
+function updateCustomSpellField(idx, field, input) {
+  if (field === 'level') {
+    selectedSpells[idx].level = parseInt(input.value) || 0;
+  } else {
+    selectedSpells[idx][field] = input.value.trim();
+  }
+}
+
 function renderSelectedSpells() {
   const container = document.getElementById('spells-selected');
   if (selectedSpells.length === 0) {
@@ -339,15 +456,26 @@ function renderSelectedSpells() {
   let html = '';
   for (const [level, spells] of Object.entries(byLevel)) {
     html += `<div style="font-size:0.8rem;color:var(--text-muted);margin:8px 0 4px;font-weight:600;">${level}</div>`;
-    html += spells.map(sp => `
+    html += spells.map(sp => {
+      const idx = selectedSpells.indexOf(sp);
+      if (sp._editing) {
+        return `
+      <div class="list-item" style="flex-wrap:wrap;padding:8px 12px;">
+        <div class="form-group" style="flex:2;"><label>Name</label><input type="text" class="spell-name" value="${esc(sp.name)}" onchange="updateCustomSpellField(${idx}, 'name', this)" placeholder="Spell name"></div>
+        <div class="form-group" style="flex:0 0 70px;"><label>Level</label><input type="number" value="${sp.level}" min="0" max="9" onchange="updateCustomSpellField(${idx}, 'level', this)"></div>
+        <div class="form-group" style="flex:2;"><label>Description</label><input type="text" value="${esc(sp.description)}" onchange="updateCustomSpellField(${idx}, 'description', this)" placeholder="Description (optional)"></div>
+        <button type="button" class="remove-item" onclick="removeSpellByIndex(${idx})">&times;</button>
+      </div>`;
+      }
+      return `
       <div class="list-item" style="flex-wrap:nowrap;align-items:center;padding:8px 12px;">
         <div style="flex:1;">
           <strong>${esc(sp.name)}</strong>
           <span style="color:var(--text-muted);font-size:0.8rem;margin-left:6px;">${esc(sp.school)} | ${esc(sp.actionType)} | ${esc(sp.range)}</span>
         </div>
         <button type="button" class="remove-item" onclick="removeSpell('${esc(sp.name)}')">&times;</button>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
   }
   container.innerHTML = html;
 }
@@ -418,6 +546,8 @@ async function openCharModal(id) {
   document.getElementById('equip-search').value = '';
   document.getElementById('equip-type-filter').value = '';
   document.getElementById('equip-results').style.display = 'none';
+  document.getElementById('f-background-custom').style.display = 'none';
+  document.getElementById('f-background-custom').value = '';
   ['cp','sp','ep','gp','pp'].forEach(k => { document.getElementById(`f-${k}`).value = 0; });
   selectedSpells = [];
   renderSelectedSpells();
@@ -441,7 +571,18 @@ async function openCharModal(id) {
     document.getElementById('f-class').value = c.class || '';
     document.getElementById('f-species').value = c.species || '';
     document.getElementById('f-level').value = c.level || 1;
-    document.getElementById('f-background').value = c.background || '';
+    const bgVal = c.background || '';
+    const bgSelect = document.getElementById('f-background');
+    const bgCustom = document.getElementById('f-background-custom');
+    if (bgVal && !BACKGROUNDS.includes(bgVal)) {
+      bgSelect.value = '__custom__';
+      bgCustom.style.display = '';
+      bgCustom.value = bgVal;
+    } else {
+      bgSelect.value = bgVal;
+      bgCustom.style.display = 'none';
+      bgCustom.value = '';
+    }
     document.getElementById('f-hp').value = c.HP || 10;
     document.getElementById('f-ac').value = c.AC || 10;
     ['STR','DEX','CON','INT','WIS','CHA'].forEach(a => {
@@ -456,6 +597,7 @@ async function openCharModal(id) {
           // Legacy: plain string features
           selectedFeatures.push({ name: f, description: '', source: '', sourceDetail: '' });
         } else {
+          if (f.source === 'custom') f._editing = true;
           selectedFeatures.push(f);
         }
       });
@@ -470,7 +612,9 @@ async function openCharModal(id) {
     if (c.spells) {
       c.spells.forEach(sp => {
         const dbSpell = allSpells.find(s => s.name === sp.name);
-        selectedSpells.push(dbSpell || sp);
+        const spell = dbSpell || sp;
+        if (!dbSpell && sp.school === 'Custom') spell._editing = true;
+        selectedSpells.push(spell);
       });
       renderSelectedSpells();
     }
@@ -492,7 +636,9 @@ async function saveCharacter(e) {
     class: document.getElementById('f-class').value,
     species: document.getElementById('f-species').value,
     level: parseInt(document.getElementById('f-level').value),
-    background: document.getElementById('f-background').value,
+    background: document.getElementById('f-background').value === '__custom__'
+      ? document.getElementById('f-background-custom').value
+      : document.getElementById('f-background').value,
     HP: parseInt(document.getElementById('f-hp').value),
     AC: parseInt(document.getElementById('f-ac').value),
     STR: parseInt(document.getElementById('f-STR').value),
@@ -750,37 +896,73 @@ function filterMonsters() {
   }).join('') || '<div style="padding:8px;color:var(--text-muted);">No monsters found</div>';
 }
 
+async function loadBattlefield() {
+  try {
+    const res = await fetch('/api/battlefield', { headers: authHeaders() });
+    if (!res.ok) return;
+    const saved = await res.json();
+    battlefieldMonsters = [];
+    saved.forEach(entry => {
+      const m = allMonsters.find(m => m.name === entry.name);
+      if (!m) return;
+      battlefieldMonsters.push({
+        ...m,
+        _uid: ++_bfUid,
+        _label: entry._label || m.name,
+        currentHP: entry.currentHP != null ? entry.currentHP : m.HP
+      });
+    });
+    // Fix labels
+    relabelBattlefield();
+    renderBattlefield();
+  } catch (e) {}
+}
+
+function saveBattlefield() {
+  const compact = battlefieldMonsters.map(m => ({
+    name: m.name,
+    _label: m._label,
+    currentHP: m.currentHP
+  }));
+  fetch('/api/battlefield', {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify(compact)
+  }).catch(() => {});
+}
+
+function relabelBattlefield() {
+  const nameCounts = {};
+  battlefieldMonsters.forEach(m => { nameCounts[m.name] = (nameCounts[m.name] || 0) + 1; });
+  for (const name of Object.keys(nameCounts)) {
+    const instances = battlefieldMonsters.filter(b => b.name === name);
+    if (instances.length === 1) {
+      instances[0]._label = name;
+    } else {
+      instances.forEach((inst, i) => { inst._label = `${name} #${i + 1}`; });
+    }
+  }
+}
+
 function addToBattlefield(idx) {
   const m = allMonsters[idx];
   if (!m) return;
-  const count = battlefieldMonsters.filter(b => b.name === m.name).length;
   battlefieldMonsters.push({
     ...m,
     _uid: ++_bfUid,
-    _label: count > 0 ? `${m.name} #${count + 1}` : m.name,
+    _label: m.name,
     currentHP: m.HP
   });
-  // Relabel all instances of this monster
-  const instances = battlefieldMonsters.filter(b => b.name === m.name);
-  if (instances.length > 1) {
-    instances.forEach((inst, i) => { inst._label = `${m.name} #${i + 1}`; });
-  }
+  relabelBattlefield();
   renderBattlefield();
+  saveBattlefield();
 }
 
 function removeFromBattlefield(uid) {
-  const removed = battlefieldMonsters.find(b => b._uid === uid);
   battlefieldMonsters = battlefieldMonsters.filter(b => b._uid !== uid);
-  // Relabel remaining instances
-  if (removed) {
-    const instances = battlefieldMonsters.filter(b => b.name === removed.name);
-    if (instances.length === 1) {
-      instances[0]._label = instances[0].name;
-    } else {
-      instances.forEach((inst, i) => { inst._label = `${inst.name} #${i + 1}`; });
-    }
-  }
+  relabelBattlefield();
   renderBattlefield();
+  saveBattlefield();
 }
 
 function clearBattlefield() {
@@ -788,6 +970,7 @@ function clearBattlefield() {
   if (!confirm('Remove all monsters from the battlefield?')) return;
   battlefieldMonsters = [];
   renderBattlefield();
+  saveBattlefield();
 }
 
 function renderBattlefield() {
@@ -840,6 +1023,7 @@ function bfHP(uid, delta) {
   if (!m) return;
   m.currentHP = Math.max(0, Math.min(m.HP, m.currentHP + delta));
   renderBattlefield();
+  saveBattlefield();
 }
 
 function showMonsterStats(uid) {

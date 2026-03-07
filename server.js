@@ -348,6 +348,31 @@ app.get('/api/sessions/qr', authDM, async (req, res) => {
   }
 });
 
+app.get('/api/battlefield', authDM, async (req, res) => {
+  try {
+    const result = await db.query('SELECT battlefield FROM dms WHERE id = $1', [req.dmId]);
+    res.json(result.rows.length > 0 ? (result.rows[0].battlefield || []) : []);
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.put('/api/battlefield', authDM, async (req, res) => {
+  const battlefield = req.body;
+  if (!Array.isArray(battlefield) || battlefield.length > 50) {
+    return res.status(400).json({ error: 'Invalid battlefield data (max 50 monsters)' });
+  }
+  try {
+    await db.query(
+      `UPDATE dms SET battlefield = $1 WHERE id = $2`,
+      [JSON.stringify(battlefield), req.dmId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.delete('/api/sessions', authDM, async (req, res) => {
   try {
     await db.query('DELETE FROM sessions WHERE dm_id = $1', [req.dmId]);

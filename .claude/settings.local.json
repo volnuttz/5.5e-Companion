@@ -9,7 +9,9 @@
       "WebFetch(domain:api.github.com)",
       "Bash(python3:*)",
       "Bash(psql:*)",
-      "Bash(brew list:*)"
+      "Bash(brew list:*)",
+      "Bash(export:*)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }
