@@ -488,6 +488,9 @@ app.get('/join/:dmUsername', (req, res) => {
 
 // --- Start ---
 
+console.log(`DATABASE_URL: ${process.env.DATABASE_URL ? 'set' : 'NOT SET'}`);
+console.log(`PORT: ${PORT}`);
+
 app.listen(PORT, '0.0.0.0', () => {
   const ip = getLocalIP();
   console.log(`DnD App running at:`);
