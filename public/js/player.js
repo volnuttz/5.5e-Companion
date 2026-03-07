@@ -133,7 +133,9 @@ async function showCharacterSheet(characterId) {
   document.getElementById('step-sheet').style.display = '';
 
   const bg = c.background ? ` - ${c.background}` : '';
-  document.querySelector('h1').textContent = `${c.name} ${c.species || ''} ${c.class} lvl ${c.level}${bg}`;
+  const h1 = document.querySelector('h1');
+  h1.textContent = `${c.name} ${c.species || ''} ${c.class} lvl ${c.level}${bg}`;
+  h1.classList.add('char-title');
 
   const profBonus = calcProfBonus(c.level);
   const maxHP = c.HP || 0;
@@ -180,11 +182,9 @@ async function showCharacterSheet(characterId) {
       <div class="label">Armor Class</div>
       <div class="value">${c.AC}</div>
     </div>
-    <div class="combat-stat">
-      <div class="label">Proficiency</div>
-      <div class="value">+${profBonus}</div>
-    </div>
   `;
+
+  document.getElementById('prof-bonus-label').textContent = `(Proficiency Bonus: +${profBonus})`;
 
   document.getElementById('hp-down').onclick = () => { if (currentHP > 0) { currentHP--; renderHP(); } };
   document.getElementById('hp-up').onclick = () => { if (currentHP < maxHP) { currentHP++; renderHP(); } };
