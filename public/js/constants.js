@@ -20,6 +20,24 @@ const HIT_DIE = {
   Warlock: 8, Wizard: 6
 };
 
+const ABILITIES = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA'];
+
+// Saving throw proficiencies per class (SRD 5.2)
+const CLASS_SAVING_THROWS = {
+  Barbarian: ['STR', 'CON'],
+  Bard:      ['DEX', 'CHA'],
+  Cleric:    ['WIS', 'CHA'],
+  Druid:     ['INT', 'WIS'],
+  Fighter:   ['STR', 'CON'],
+  Monk:      ['STR', 'DEX'],
+  Paladin:   ['WIS', 'CHA'],
+  Ranger:    ['STR', 'DEX'],
+  Rogue:     ['DEX', 'INT'],
+  Sorcerer:  ['CON', 'CHA'],
+  Warlock:   ['WIS', 'CHA'],
+  Wizard:    ['INT', 'WIS']
+};
+
 // Spellcasting ability per class
 const SPELLCASTING_ABILITY = {
   Bard: 'CHA',

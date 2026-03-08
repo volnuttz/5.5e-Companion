@@ -233,6 +233,21 @@ async function showCharacterSheet(characterId) {
     `;
   }).join('');
 
+  const ABILITIES = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA'];
+  document.getElementById('saving-throws-grid').innerHTML = ABILITIES.map((a, i) => {
+    const abilityScore = c[a] || 10;
+    const abilityMod = Math.floor((abilityScore - 10) / 2);
+    const proficient = c.savingThrows && c.savingThrows[i];
+    const total = abilityMod + (proficient ? profBonus : 0);
+    const modStr = total >= 0 ? `+${total}` : `${total}`;
+    return `
+      <div class="skill-item">
+        <span>${proficient ? '<strong style="color:var(--accent);">*</strong> ' : ''}${a}</span>
+        <span class="skill-mod">${modStr}</span>
+      </div>
+    `;
+  }).join('');
+
   document.getElementById('skills-grid').innerHTML = SKILL_ABILITIES.map((s, i) => {
     const abilityScore = c[s.ability] || 10;
     const abilityMod = Math.floor((abilityScore - 10) / 2);

@@ -63,6 +63,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('dm-name').textContent = localStorage.getItem('dmUsername') || '';
 
   populateDropdowns();
+  renderSavingThrows();
   renderSkillInputs();
   loadCharacters();
   checkExistingSession();
@@ -76,14 +77,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('char-form').addEventListener('submit', saveCharacter);
   document.getElementById('btn-logout').addEventListener('click', logout);
 
-  // Recalculate skills when abilities or level change
+  // Recalculate skills and saving throws when abilities or level change
   ['STR','DEX','CON','INT','WIS','CHA'].forEach(a => {
-    document.getElementById(`f-${a}`).addEventListener('input', updateSkillModifiers);
+    document.getElementById(`f-${a}`).addEventListener('input', () => {
+      updateSkillModifiers();
+      updateSavingThrows();
+    });
   });
-  document.getElementById('f-level').addEventListener('input', updateSkillModifiers);
+  document.getElementById('f-level').addEventListener('input', () => {
+    updateSkillModifiers();
+    updateSavingThrows();
+  });
 
-  // Auto-set HP when class changes and level is 1
-  document.getElementById('f-class').addEventListener('change', autoSetHP);
+  // Update saving throw proficiencies when class changes
+  document.getElementById('f-class').addEventListener('change', () => {
+    renderSavingThrows();
+    autoSetHP();
+  });
   document.getElementById('f-CON').addEventListener('input', autoSetHP);
 
   // Feature search — also refresh when class/species/level change
@@ -480,6 +490,35 @@ function renderSelectedSpells() {
   container.innerHTML = html;
 }
 
+// --- Saving Throws ---
+function renderSavingThrows(savedProficiencies) {
+  const container = document.getElementById('saving-throws-inputs');
+  const cls = document.getElementById('f-class').value;
+  const classSaves = CLASS_SAVING_THROWS[cls] || [];
+  container.innerHTML = ABILITIES.map((a, i) => {
+    // Use saved proficiency if provided, otherwise auto-set from class
+    const checked = savedProficiencies ? savedProficiencies[i] : classSaves.includes(a);
+    return `
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 8px;background:var(--bg-input);border-radius:4px;">
+        <input type="checkbox" id="f-save-prof-${i}" ${checked ? 'checked' : ''} onchange="updateSavingThrows()">
+        <span style="flex:1;font-size:0.9rem;">${a}</span>
+        <span id="f-save-mod-${i}" style="color:var(--gold);font-weight:600;font-size:0.9rem;min-width:28px;text-align:right;">+0</span>
+      </div>`;
+  }).join('');
+  updateSavingThrows();
+}
+
+function updateSavingThrows() {
+  const profBonus = getProficiencyBonus();
+  ABILITIES.forEach((a, i) => {
+    const abilityMod = getAbilityMod(a);
+    const proficient = document.getElementById(`f-save-prof-${i}`)?.checked || false;
+    const total = abilityMod + (proficient ? profBonus : 0);
+    const modEl = document.getElementById(`f-save-mod-${i}`);
+    if (modEl) modEl.textContent = total >= 0 ? `+${total}` : `${total}`;
+  });
+}
+
 // --- Skills form fields ---
 function renderSkillInputs(proficiencies) {
   const container = document.getElementById('skills-inputs');
@@ -560,6 +599,7 @@ async function openCharModal(id) {
   document.getElementById('feature-search').value = '';
   document.getElementById('feature-source-filter').value = '';
   document.getElementById('feature-results').style.display = 'none';
+  renderSavingThrows();
   renderSkillInputs();
 
   if (id) {
@@ -588,7 +628,8 @@ async function openCharModal(id) {
     ['STR','DEX','CON','INT','WIS','CHA'].forEach(a => {
       document.getElementById(`f-${a}`).value = c[a] || 10;
     });
-    // Render skills with proficiency data
+    // Render saving throws and skills with proficiency data
+    renderSavingThrows(c.savingThrows);
     renderSkillInputs(c.skills || []);
     // Load features
     if (c.features) {
@@ -647,6 +688,7 @@ async function saveCharacter(e) {
     INT: parseInt(document.getElementById('f-INT').value),
     WIS: parseInt(document.getElementById('f-WIS').value),
     CHA: parseInt(document.getElementById('f-CHA').value),
+    savingThrows: ABILITIES.map((_, i) => document.getElementById(`f-save-prof-${i}`).checked),
     skills: SKILL_ABILITIES.map((_, i) => document.getElementById(`f-skill-prof-${i}`).checked),
     features: selectedFeatures.map(f => ({ name: f.name, description: f.description, source: f.source, sourceDetail: f.sourceDetail })),
     currency: {
