@@ -1550,9 +1550,10 @@ function parseCharFromTOML(text) {
   return c;
 }
 
-function exportCharacter(id) {
-  const c = characters.find(x => x._id === id);
-  if (!c) return;
+async function exportCharacter(id) {
+  const res = await fetch(`/api/characters/${id}`, { headers: authHeaders() });
+  if (!res.ok) return alert('Failed to load character');
+  const c = await res.json();
   const toml = serializeCharToTOML(c);
   const blob = new Blob([toml], { type: 'text/plain' });
   const a = document.createElement('a');
