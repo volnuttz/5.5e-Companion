@@ -1,6 +1,6 @@
-# 5e Companion
+# 5.5e Companion
 
-A web app for tabletop D&D 5e sessions. DMs manage characters and track battlefield encounters, while players view their character sheets in real time via QR code + PIN.
+A web app for tabletop D&D 5.5e sessions. DMs manage characters and track battlefield encounters, while players view their character sheets in real time via QR code + PIN.
 
 ## Features
 

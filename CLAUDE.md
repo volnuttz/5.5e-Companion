@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-5e Companion - A D&D 5e session companion web app. DMs manage characters and battlefield, players join via QR + PIN and see real-time updates.
+5.5e Companion - A D&D 5.5e session companion web app. DMs manage characters and battlefield, players join via QR + PIN and see real-time updates.
 
 ## Tech Stack
 

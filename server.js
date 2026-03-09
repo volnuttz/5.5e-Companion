@@ -394,8 +394,14 @@ app.put('/api/treasures', authDM, async (req, res) => {
   if (!Array.isArray(treasures) || treasures.length > 100) {
     return res.status(400).json({ error: 'Invalid treasures data (max 100 items)' });
   }
+  const sanitizedTreasures = treasures.map(t => ({
+    name: sanitizeString(t.name, 100),
+    type: sanitizeString(t.type, 50),
+    description: sanitizeString(t.description, 500),
+    quantity: Math.max(0, Math.min(9999, parseInt(t.quantity) || 1))
+  }));
   try {
-    await db.query('UPDATE dms SET treasures = $1 WHERE id = $2', [JSON.stringify(treasures), req.dmId]);
+    await db.query('UPDATE dms SET treasures = $1 WHERE id = $2', [JSON.stringify(sanitizedTreasures), req.dmId]);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
@@ -413,7 +419,12 @@ app.post('/api/treasures/assign', authDM, async (req, res) => {
     const row = result.rows[0];
     const equipment = row.equipment || [];
     if (equipment.length >= 50) return res.status(400).json({ error: 'Equipment limit reached (max 50)' });
-    equipment.push(item);
+    equipment.push({
+      name: sanitizeString(item.name, 100),
+      type: sanitizeString(item.type, 50),
+      description: sanitizeString(item.description, 500),
+      quantity: Math.max(0, Math.min(9999, parseInt(item.quantity) || 1))
+    });
     await db.query('UPDATE characters SET equipment = $1, updated_at = NOW() WHERE id = $2', [JSON.stringify(equipment), characterId]);
     broadcastCharacterUpdate(req.dmUsername, characterId);
     res.json({ ok: true });
@@ -437,12 +448,25 @@ app.put('/api/shops', authDM, async (req, res) => {
   if (!Array.isArray(shops) || shops.length > 20) {
     return res.status(400).json({ error: 'Invalid shops data (max 20 shops)' });
   }
+  const VALID_DENOMS = ['CP', 'SP', 'EP', 'GP', 'PP'];
   for (const shop of shops) {
     if (!shop.name || shop.name.length > 100) return res.status(400).json({ error: 'Invalid shop name' });
     if (!Array.isArray(shop.items) || shop.items.length > 100) return res.status(400).json({ error: 'Too many items in shop (max 100)' });
   }
+  const sanitizedShops = shops.map(s => ({
+    id: sanitizeString(s.id, 50),
+    name: sanitizeString(s.name, 100),
+    items: (s.items || []).slice(0, 100).map(it => ({
+      name: sanitizeString(it.name, 100),
+      type: sanitizeString(it.type, 50),
+      description: sanitizeString(it.description, 500),
+      price: Math.max(0, Math.min(999999, parseInt(it.price) || 0)),
+      denomination: VALID_DENOMS.includes(it.denomination) ? it.denomination : 'GP',
+      quantity: parseInt(it.quantity) || -1
+    }))
+  }));
   try {
-    await db.query('UPDATE dms SET shops = $1 WHERE id = $2', [JSON.stringify(shops), req.dmId]);
+    await db.query('UPDATE dms SET shops = $1 WHERE id = $2', [JSON.stringify(sanitizedShops), req.dmId]);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
@@ -471,8 +495,9 @@ app.post('/api/shops/sell', authDM, async (req, res) => {
     const equipment = row.equipment || [];
 
     // Check currency
-    const denom = item.denomination || 'GP';
-    const price = item.price || 0;
+    const validDenoms = ['CP', 'SP', 'EP', 'GP', 'PP'];
+    const denom = validDenoms.includes(item.denomination) ? item.denomination : 'GP';
+    const price = Math.max(0, Math.min(999999, parseInt(item.price) || 0));
     if (price > 0 && (currency[denom] || 0) < price) {
       return res.status(400).json({ error: `Not enough ${denom} (need ${price}, have ${currency[denom] || 0})` });
     }
@@ -482,7 +507,12 @@ app.post('/api/shops/sell', authDM, async (req, res) => {
 
     // Deduct currency and add item
     if (price > 0) currency[denom] -= price;
-    equipment.push({ name: item.name, type: item.type || '', description: item.description || '', quantity: 1 });
+    equipment.push({
+      name: sanitizeString(item.name, 100),
+      type: sanitizeString(item.type, 50),
+      description: sanitizeString(item.description, 500),
+      quantity: 1
+    });
 
     await db.query(
       'UPDATE characters SET currency = $1, equipment = $2, updated_at = NOW() WHERE id = $3',
