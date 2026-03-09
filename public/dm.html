@@ -48,6 +48,8 @@
     <div class="tabs">
       <button class="tab active" data-tab="dm-tab-characters">Characters</button>
       <button class="tab" data-tab="dm-tab-battlefield">Battlefield</button>
+      <button class="tab" data-tab="dm-tab-treasures">Treasures</button>
+      <button class="tab" data-tab="dm-tab-shops">Shops</button>
       <button class="tab" data-tab="dm-tab-notes">Notes</button>
       <button class="tab" data-tab="dm-tab-compendium">Compendium</button>
     </div>
@@ -93,6 +95,47 @@
       </div>
     </div>
 
+    <!-- Treasures Tab -->
+    <div class="tab-content" id="dm-tab-treasures">
+      <div class="card">
+        <h2 style="margin-bottom:12px;">Add Items</h2>
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <input type="text" id="treasure-search" placeholder="Search equipment..." style="flex:1;padding:8px 12px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;">
+          <select id="treasure-type-filter" style="padding:8px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;">
+            <option value="">All Types</option>
+            <option value="Weapon">Weapons</option>
+            <option value="Armor">Armor</option>
+            <option value="Item">Items</option>
+          </select>
+        </div>
+        <div id="treasure-results" class="list-section" style="max-height:250px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;display:none;"></div>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h2 style="margin:0;">Treasure Pool</h2>
+          <button class="btn btn-danger btn-small" id="btn-clear-treasures">Clear All</button>
+        </div>
+        <div id="treasure-list"></div>
+        <p id="treasure-empty" style="color:var(--text-muted);">No items in the treasure pool. Search and add items above.</p>
+      </div>
+    </div>
+
+    <!-- Shops Tab -->
+    <div class="tab-content" id="dm-tab-shops">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h2 style="margin:0;">Shops</h2>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input type="text" id="new-shop-name" placeholder="Shop name..." style="padding:8px 12px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;">
+            <button class="btn btn-primary btn-small" id="btn-create-shop">+ New Shop</button>
+          </div>
+        </div>
+        <p id="shops-empty" style="color:var(--text-muted);">No shops created. Enter a name and click "+ New Shop" to get started.</p>
+        <div id="shops-list"></div>
+      </div>
+    </div>
+
     <!-- Notes Tab -->
     <div class="tab-content" id="dm-tab-notes">
       <div class="card">
@@ -102,7 +145,7 @@
             <span id="notes-save-status" style="font-size:0.8rem;color:var(--text-muted);"></span>
           </div>
         </div>
-        <textarea id="notes-editor" placeholder="Write your notes in markdown..." style="width:100%;min-height:500px;padding:12px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:'Crimson Text',serif;font-size:1rem;resize:vertical;line-height:1.6;"></textarea>
+        <textarea id="notes-editor" placeholder="Write your notes here..." style="width:100%;min-height:500px;padding:12px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:'Crimson Text',serif;font-size:1rem;resize:vertical;line-height:1.6;"></textarea>
       </div>
     </div>
 

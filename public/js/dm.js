@@ -41,6 +41,9 @@ let selectedFeatures = [];
 let allEquipment = [];
 let allMonsters = [];
 let battlefieldMonsters = []; // { ...monsterData, _uid, currentHP }
+let treasurePool = []; // { name, type, description, quantity }
+let allCharacters = []; // cached for treasure assignment
+let shops = []; // [{ id, name, items: [{ name, type, description, price, denomination, quantity }] }]
 
 function getToken() {
   return localStorage.getItem('dmToken');
@@ -69,6 +72,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   checkExistingSession();
   await Promise.all([loadSpellsDB(), loadFeaturesDB(), loadEquipmentDB(), loadMonstersDB()]);
   await loadBattlefield();
+  await loadTreasures();
+  await loadShops();
   loadNotes();
 
   document.getElementById('btn-new-session').addEventListener('click', createSession);
@@ -119,6 +124,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('monster-type-filter').addEventListener('change', filterMonsters);
   document.getElementById('monster-cr-filter').addEventListener('change', filterMonsters);
   document.getElementById('btn-clear-battlefield').addEventListener('click', clearBattlefield);
+
+  // Treasures
+  document.getElementById('treasure-search').addEventListener('input', filterTreasureSearch);
+  document.getElementById('treasure-type-filter').addEventListener('change', filterTreasureSearch);
+  document.getElementById('btn-clear-treasures').addEventListener('click', clearTreasures);
+
+  // Shops
+  document.getElementById('btn-create-shop').addEventListener('click', createShop);
 
   // Equipment search
   document.getElementById('equip-search').addEventListener('input', filterEquipment);
@@ -573,6 +586,7 @@ async function loadCharacters() {
   const res = await fetch('/api/characters', { headers: authHeaders() });
   if (res.status === 401) return logout();
   const chars = await res.json();
+  allCharacters = chars;
   renderCharacterList(chars);
 }
 
@@ -1598,6 +1612,451 @@ async function importCharacterFile(event) {
     return;
   }
   loadCharacters();
+}
+
+// --- Treasures ---
+async function loadTreasures() {
+  try {
+    const res = await fetch('/api/treasures', { headers: authHeaders() });
+    if (!res.ok) return;
+    treasurePool = await res.json();
+    renderTreasures();
+  } catch (e) {}
+}
+
+function saveTreasures() {
+  fetch('/api/treasures', {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify(treasurePool)
+  }).catch(() => {});
+}
+
+function filterTreasureSearch() {
+  const query = document.getElementById('treasure-search').value.trim().toLowerCase();
+  const typeFilter = document.getElementById('treasure-type-filter').value;
+  const resultsEl = document.getElementById('treasure-results');
+
+  if (!query && !typeFilter) { resultsEl.style.display = 'none'; return; }
+
+  let filtered = allEquipment;
+  if (typeFilter) filtered = filtered.filter(e => e.type === typeFilter);
+  if (query) filtered = filtered.filter(e =>
+    e.name.toLowerCase().includes(query) ||
+    (e.category && e.category.toLowerCase().includes(query))
+  );
+
+  resultsEl.style.display = '';
+  resultsEl.innerHTML = filtered.slice(0, 50).map((e, i) => {
+    let detail = e.category || '';
+    if (e.damage) detail += ` | ${e.damage}`;
+    if (e.AC) detail += ` | AC: ${e.AC}`;
+    if (e.cost) detail += ` | ${e.cost}`;
+    if (e.properties && e.properties !== '—') detail += ` | ${e.properties}`;
+    return `
+      <div class="list-item" style="cursor:pointer;" onclick="addToTreasures(${i}, this)">
+        <div>
+          <strong>${esc(e.name)}</strong>
+          <span style="color:var(--text-muted);font-size:0.8rem;margin-left:6px;">${esc(detail)}</span>
+        </div>
+      </div>`;
+  }).join('') || '<div style="padding:8px;color:var(--text-muted);">No items found</div>';
+  resultsEl._filtered = filtered;
+}
+
+function addToTreasures(idx, el) {
+  const resultsEl = document.getElementById('treasure-results');
+  const e = resultsEl._filtered[idx];
+  if (!e) return;
+
+  let desc = '';
+  if (e.damage) desc += e.damage;
+  if (e.AC) desc += (desc ? ' | ' : '') + 'AC: ' + e.AC;
+  if (e.properties && e.properties !== '—') desc += (desc ? ' | ' : '') + e.properties;
+  if (e.weight && e.weight !== '—') desc += (desc ? ' | ' : '') + e.weight;
+  if (e.cost) desc += (desc ? ' | ' : '') + e.cost;
+
+  treasurePool.push({
+    name: e.name,
+    type: e.category || e.type,
+    description: desc,
+    quantity: 1
+  });
+  renderTreasures();
+  saveTreasures();
+}
+
+function removeFromTreasures(idx) {
+  treasurePool.splice(idx, 1);
+  renderTreasures();
+  saveTreasures();
+}
+
+function clearTreasures() {
+  if (treasurePool.length === 0) return;
+  if (!confirm('Remove all items from the treasure pool?')) return;
+  treasurePool = [];
+  renderTreasures();
+  saveTreasures();
+}
+
+function renderTreasures() {
+  const container = document.getElementById('treasure-list');
+  const emptyMsg = document.getElementById('treasure-empty');
+
+  // Preserve current character selections onto the treasure objects
+  treasurePool.forEach((item, i) => {
+    const sel = document.getElementById(`treasure-assign-${i}`);
+    if (sel && sel.value) item._assignTo = sel.value;
+  });
+
+  if (treasurePool.length === 0) {
+    container.innerHTML = '';
+    emptyMsg.style.display = '';
+    return;
+  }
+  emptyMsg.style.display = 'none';
+
+  container.innerHTML = treasurePool.map((item, idx) => {
+    const charOptions = allCharacters.map(c =>
+      `<option value="${c._id}">${esc(c.name)}</option>`
+    ).join('');
+    return `
+      <div class="list-item" style="flex-wrap:wrap;align-items:center;padding:10px 12px;gap:8px;">
+        <div style="flex:1;min-width:150px;">
+          <strong>${esc(item.name)}</strong>
+          <span style="color:var(--text-muted);font-size:0.8rem;margin-left:6px;">${esc(item.type || '')}</span>
+          <div style="font-size:0.85rem;color:var(--text-muted);margin-top:2px;">${esc(item.description || '')}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <select id="treasure-assign-${idx}" style="padding:4px 8px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:0.85rem;">
+            <option value="">Assign to...</option>
+            ${charOptions}
+          </select>
+          <button type="button" class="btn btn-primary btn-small" onclick="assignTreasure(${idx})">Assign</button>
+          <button type="button" class="remove-item" onclick="removeFromTreasures(${idx})">&times;</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  // Restore saved selections
+  treasurePool.forEach((item, i) => {
+    if (item._assignTo) {
+      const sel = document.getElementById(`treasure-assign-${i}`);
+      if (sel) sel.value = item._assignTo;
+    }
+  });
+}
+
+async function assignTreasure(idx) {
+  const item = treasurePool[idx];
+  if (!item) return;
+  const select = document.getElementById(`treasure-assign-${idx}`);
+  const characterId = select.value;
+  if (!characterId) return alert('Select a character first');
+
+  try {
+    const res = await fetch('/api/treasures/assign', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        characterId,
+        item: { name: item.name, type: item.type, description: item.description, quantity: item.quantity }
+      })
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      return alert(data.error || 'Failed to assign');
+    }
+    const charName = allCharacters.find(c => c._id === characterId)?.name || 'character';
+    treasurePool.splice(idx, 1);
+    renderTreasures();
+    saveTreasures();
+    loadCharacters(); // refresh character list
+  } catch (e) {
+    alert('Failed to assign item');
+  }
+}
+
+// --- Shops ---
+async function loadShops() {
+  try {
+    const res = await fetch('/api/shops', { headers: authHeaders() });
+    if (!res.ok) return;
+    shops = await res.json();
+    renderShops();
+  } catch (e) {}
+}
+
+function saveShops() {
+  const clean = shops.map(s => ({
+    id: s.id, name: s.name,
+    items: s.items.map(it => ({
+      name: it.name, type: it.type, description: it.description,
+      price: it.price, denomination: it.denomination, quantity: it.quantity
+    }))
+  }));
+  fetch('/api/shops', {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify(clean)
+  }).catch(() => {});
+}
+
+function createShop() {
+  const input = document.getElementById('new-shop-name');
+  const name = input.value.trim();
+  if (!name) return;
+  if (shops.length >= 20) return alert('Maximum 20 shops');
+  shops.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), name, items: [] });
+  input.value = '';
+  renderShops();
+  saveShops();
+}
+
+function deleteShop(shopIdx) {
+  if (!confirm(`Delete shop "${shops[shopIdx].name}"?`)) return;
+  shops.splice(shopIdx, 1);
+  renderShops();
+  saveShops();
+}
+
+function parseCostString(costStr) {
+  if (!costStr || costStr === '—') return { price: 0, denomination: 'GP' };
+  const match = costStr.match(/^([\d,]+)\s*(CP|SP|EP|GP|PP)/i);
+  if (match) return { price: parseInt(match[1].replace(',', '')), denomination: match[2].toUpperCase() };
+  return { price: 0, denomination: 'GP' };
+}
+
+function filterShopItems(shopIdx) {
+  const search = document.getElementById(`shop-search-${shopIdx}`);
+  const typeFilter = document.getElementById(`shop-type-${shopIdx}`);
+  const resultsEl = document.getElementById(`shop-results-${shopIdx}`);
+  if (!search || !resultsEl) return;
+
+  const query = search.value.trim().toLowerCase();
+  const type = typeFilter.value;
+
+  if (!query && !type) { resultsEl.style.display = 'none'; return; }
+
+  let filtered = allEquipment;
+  if (type) filtered = filtered.filter(e => e.type === type);
+  if (query) filtered = filtered.filter(e =>
+    e.name.toLowerCase().includes(query) ||
+    (e.category && e.category.toLowerCase().includes(query))
+  );
+
+  resultsEl.style.display = '';
+  resultsEl.innerHTML = filtered.slice(0, 50).map((e, i) => {
+    let detail = e.category || '';
+    if (e.damage) detail += ` | ${e.damage}`;
+    if (e.AC) detail += ` | AC: ${e.AC}`;
+    if (e.cost) detail += ` | ${e.cost}`;
+    return `
+      <div class="list-item" style="cursor:pointer;" onclick="addItemToShop(${shopIdx}, ${i})">
+        <div>
+          <strong>${esc(e.name)}</strong>
+          <span style="color:var(--text-muted);font-size:0.8rem;margin-left:6px;">${esc(detail)}</span>
+        </div>
+      </div>`;
+  }).join('') || '<div style="padding:8px;color:var(--text-muted);">No items found</div>';
+  resultsEl._filtered = filtered;
+}
+
+function addItemToShop(shopIdx, filteredIdx) {
+  const resultsEl = document.getElementById(`shop-results-${shopIdx}`);
+  const e = resultsEl._filtered[filteredIdx];
+  if (!e) return;
+
+  let desc = '';
+  if (e.damage) desc += e.damage;
+  if (e.AC) desc += (desc ? ' | ' : '') + 'AC: ' + e.AC;
+  if (e.properties && e.properties !== '—') desc += (desc ? ' | ' : '') + e.properties;
+
+  const { price, denomination } = parseCostString(e.cost);
+
+  shops[shopIdx].items.push({
+    name: e.name,
+    type: e.category || e.type,
+    description: desc,
+    price,
+    denomination,
+    quantity: -1
+  });
+  renderShops();
+  saveShops();
+}
+
+function addCustomShopItem(shopIdx) {
+  shops[shopIdx].items.push({
+    name: '', type: '', description: '',
+    price: 0, denomination: 'GP', quantity: -1, _editing: true
+  });
+  renderShops();
+  const inputs = document.querySelectorAll(`#shop-inventory-${shopIdx} .shop-item-name`);
+  if (inputs.length) inputs[inputs.length - 1].focus();
+}
+
+function removeShopItem(shopIdx, itemIdx) {
+  shops[shopIdx].items.splice(itemIdx, 1);
+  renderShops();
+  saveShops();
+}
+
+function updateShopItem(shopIdx, itemIdx, field, value) {
+  const item = shops[shopIdx].items[itemIdx];
+  if (!item) return;
+  if (field === 'price') {
+    item.price = Math.max(0, parseInt(value) || 0);
+  } else if (field === 'quantity') {
+    item.quantity = parseInt(value) || -1;
+  } else {
+    item[field] = value;
+  }
+  saveShops();
+}
+
+function renderShops() {
+  const container = document.getElementById('shops-list');
+  const emptyMsg = document.getElementById('shops-empty');
+
+  // Save character selections and search values
+  const savedSelections = {};
+  const savedSearches = {};
+  shops.forEach((shop, si) => {
+    shop.items.forEach((_, ii) => {
+      const sel = document.getElementById(`shop-sell-${si}-${ii}`);
+      if (sel && sel.value) savedSelections[`${si}-${ii}`] = sel.value;
+    });
+    const search = document.getElementById(`shop-search-${si}`);
+    if (search && search.value) savedSearches[si] = search.value;
+  });
+
+  if (shops.length === 0) {
+    container.innerHTML = '';
+    emptyMsg.style.display = '';
+    return;
+  }
+  emptyMsg.style.display = 'none';
+
+  const charOptions = allCharacters.map(c =>
+    `<option value="${c._id}">${esc(c.name)}</option>`
+  ).join('');
+
+  container.innerHTML = shops.map((shop, si) => {
+    const itemsHtml = shop.items.map((item, ii) => {
+      if (item._editing) {
+        return `
+          <div class="list-item" style="flex-wrap:wrap;padding:8px 12px;gap:6px;">
+            <div class="form-group" style="flex:2;margin:0;"><input type="text" class="shop-item-name" value="${esc(item.name)}" placeholder="Item name" onchange="updateShopItem(${si},${ii},'name',this.value)"></div>
+            <div class="form-group" style="flex:0 0 70px;margin:0;"><input type="number" value="${item.price}" min="0" style="width:100%;" onchange="updateShopItem(${si},${ii},'price',this.value)"></div>
+            <div class="form-group" style="flex:0 0 70px;margin:0;">
+              <select onchange="updateShopItem(${si},${ii},'denomination',this.value)" style="width:100%;">
+                ${['CP','SP','EP','GP','PP'].map(d => `<option value="${d}" ${item.denomination === d ? 'selected' : ''}>${d}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group" style="flex:2;margin:0;"><input type="text" value="${esc(item.description)}" placeholder="Description" onchange="updateShopItem(${si},${ii},'description',this.value)"></div>
+            <button type="button" class="remove-item" onclick="removeShopItem(${si},${ii})">&times;</button>
+          </div>`;
+      }
+      return `
+        <div class="list-item" style="flex-wrap:wrap;align-items:center;padding:8px 12px;gap:6px;">
+          <div style="flex:1;min-width:150px;">
+            <strong>${esc(item.name)}</strong>
+            <span style="color:var(--text-muted);font-size:0.8rem;margin-left:6px;">${esc(item.type || '')}</span>
+            <div style="font-size:0.85rem;color:var(--text-muted);margin-top:2px;">${esc(item.description || '')}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:4px;font-weight:600;color:var(--gold);min-width:70px;">
+            <input type="number" value="${item.price}" min="0" style="width:50px;padding:2px 4px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px;text-align:right;" onchange="updateShopItem(${si},${ii},'price',this.value)">
+            <select onchange="updateShopItem(${si},${ii},'denomination',this.value)" style="padding:2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:0.85rem;">
+              ${['CP','SP','EP','GP','PP'].map(d => `<option value="${d}" ${item.denomination === d ? 'selected' : ''}>${d}</option>`).join('')}
+            </select>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <select id="shop-sell-${si}-${ii}" style="padding:4px 8px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:0.85rem;">
+              <option value="">Sell to...</option>
+              ${charOptions}
+            </select>
+            <button type="button" class="btn btn-primary btn-small" onclick="sellShopItem(${si},${ii})">Sell</button>
+            <button type="button" class="remove-item" onclick="removeShopItem(${si},${ii})">&times;</button>
+          </div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="card" style="margin-top:12px;border-left:3px solid var(--gold);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <h3 style="margin:0;">${esc(shop.name)}</h3>
+          <button class="btn btn-danger btn-small" onclick="deleteShop(${si})">Delete Shop</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <input type="text" id="shop-search-${si}" placeholder="Search equipment..." oninput="filterShopItems(${si})" style="flex:1;padding:8px 12px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;">
+          <select id="shop-type-${si}" onchange="filterShopItems(${si})" style="padding:8px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;">
+            <option value="">All Types</option>
+            <option value="Weapon">Weapons</option>
+            <option value="Armor">Armor</option>
+            <option value="Item">Items</option>
+          </select>
+        </div>
+        <div id="shop-results-${si}" class="list-section" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;display:none;"></div>
+        <div id="shop-inventory-${si}" style="margin-top:8px;">
+          ${itemsHtml || '<p style="color:var(--text-muted);margin:4px 0;">No items in this shop yet.</p>'}
+        </div>
+        <button type="button" class="btn btn-secondary btn-small" onclick="addCustomShopItem(${si})" style="margin-top:8px;">+ Add Custom</button>
+      </div>`;
+  }).join('');
+
+  // Restore character selections and search values
+  for (const [key, val] of Object.entries(savedSelections)) {
+    const sel = document.getElementById(`shop-sell-${key}`);
+    if (sel) sel.value = val;
+  }
+  for (const [si, val] of Object.entries(savedSearches)) {
+    const search = document.getElementById(`shop-search-${si}`);
+    if (search) search.value = val;
+  }
+}
+
+async function sellShopItem(shopIdx, itemIdx) {
+  const shop = shops[shopIdx];
+  if (!shop) return;
+  const item = shop.items[itemIdx];
+  if (!item) return;
+
+  const select = document.getElementById(`shop-sell-${shopIdx}-${itemIdx}`);
+  const characterId = select.value;
+  if (!characterId) return alert('Select a character first');
+
+  try {
+    const res = await fetch('/api/shops/sell', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ shopId: shop.id, itemIndex: itemIdx, characterId })
+    });
+    const data = await res.json();
+    if (!res.ok) return alert(data.error || 'Failed to sell');
+
+    // Update local shop state if finite stock
+    if (item.quantity > 0) {
+      item.quantity--;
+      if (item.quantity === 0) shop.items.splice(itemIdx, 1);
+    }
+    const charName = allCharacters.find(c => c._id === characterId)?.name || 'character';
+    renderShops();
+    loadCharacters();
+
+    // Show sold confirmation on the new button
+    const newBtn = document.getElementById(`shop-sell-${shopIdx}-${itemIdx}`)?.parentElement?.querySelector('.btn-primary');
+    if (newBtn) {
+      const orig = newBtn.textContent;
+      newBtn.textContent = `Sold to ${charName}!`;
+      newBtn.style.background = 'var(--gold)';
+      newBtn.disabled = true;
+      setTimeout(() => { newBtn.textContent = orig; newBtn.style.background = ''; newBtn.disabled = false; }, 2000);
+    }
+  } catch (e) {
+    alert('Failed to sell item');
+  }
 }
 
 // --- Notes ---

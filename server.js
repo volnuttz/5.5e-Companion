@@ -379,6 +379,130 @@ app.put('/api/battlefield', authDM, async (req, res) => {
   }
 });
 
+// --- Treasures ---
+app.get('/api/treasures', authDM, async (req, res) => {
+  try {
+    const result = await db.query('SELECT treasures FROM dms WHERE id = $1', [req.dmId]);
+    res.json(result.rows.length > 0 ? (result.rows[0].treasures || []) : []);
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.put('/api/treasures', authDM, async (req, res) => {
+  const treasures = req.body;
+  if (!Array.isArray(treasures) || treasures.length > 100) {
+    return res.status(400).json({ error: 'Invalid treasures data (max 100 items)' });
+  }
+  try {
+    await db.query('UPDATE dms SET treasures = $1 WHERE id = $2', [JSON.stringify(treasures), req.dmId]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/treasures/assign', authDM, async (req, res) => {
+  const { characterId, item } = req.body;
+  if (!characterId || !item || !item.name) {
+    return res.status(400).json({ error: 'Missing character or item' });
+  }
+  try {
+    const result = await db.query('SELECT * FROM characters WHERE id = $1 AND dm_id = $2', [characterId, req.dmId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Character not found' });
+    const row = result.rows[0];
+    const equipment = row.equipment || [];
+    if (equipment.length >= 50) return res.status(400).json({ error: 'Equipment limit reached (max 50)' });
+    equipment.push(item);
+    await db.query('UPDATE characters SET equipment = $1, updated_at = NOW() WHERE id = $2', [JSON.stringify(equipment), characterId]);
+    broadcastCharacterUpdate(req.dmUsername, characterId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// --- Shops ---
+app.get('/api/shops', authDM, async (req, res) => {
+  try {
+    const result = await db.query('SELECT shops FROM dms WHERE id = $1', [req.dmId]);
+    res.json(result.rows.length > 0 ? (result.rows[0].shops || []) : []);
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.put('/api/shops', authDM, async (req, res) => {
+  const shops = req.body;
+  if (!Array.isArray(shops) || shops.length > 20) {
+    return res.status(400).json({ error: 'Invalid shops data (max 20 shops)' });
+  }
+  for (const shop of shops) {
+    if (!shop.name || shop.name.length > 100) return res.status(400).json({ error: 'Invalid shop name' });
+    if (!Array.isArray(shop.items) || shop.items.length > 100) return res.status(400).json({ error: 'Too many items in shop (max 100)' });
+  }
+  try {
+    await db.query('UPDATE dms SET shops = $1 WHERE id = $2', [JSON.stringify(shops), req.dmId]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/shops/sell', authDM, async (req, res) => {
+  const { shopId, itemIndex, characterId } = req.body;
+  if (!shopId || itemIndex == null || !characterId) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  try {
+    // Load shops
+    const dmResult = await db.query('SELECT shops FROM dms WHERE id = $1', [req.dmId]);
+    const shops = dmResult.rows[0]?.shops || [];
+    const shop = shops.find(s => s.id === shopId);
+    if (!shop) return res.status(404).json({ error: 'Shop not found' });
+    const item = shop.items[itemIndex];
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+
+    // Load character
+    const charResult = await db.query('SELECT * FROM characters WHERE id = $1 AND dm_id = $2', [characterId, req.dmId]);
+    if (charResult.rows.length === 0) return res.status(404).json({ error: 'Character not found' });
+    const row = charResult.rows[0];
+    const currency = row.currency || { CP: 0, SP: 0, EP: 0, GP: 0, PP: 0 };
+    const equipment = row.equipment || [];
+
+    // Check currency
+    const denom = item.denomination || 'GP';
+    const price = item.price || 0;
+    if (price > 0 && (currency[denom] || 0) < price) {
+      return res.status(400).json({ error: `Not enough ${denom} (need ${price}, have ${currency[denom] || 0})` });
+    }
+
+    // Check equipment limit
+    if (equipment.length >= 50) return res.status(400).json({ error: 'Equipment limit reached (max 50)' });
+
+    // Deduct currency and add item
+    if (price > 0) currency[denom] -= price;
+    equipment.push({ name: item.name, type: item.type || '', description: item.description || '', quantity: 1 });
+
+    await db.query(
+      'UPDATE characters SET currency = $1, equipment = $2, updated_at = NOW() WHERE id = $3',
+      [JSON.stringify(currency), JSON.stringify(equipment), characterId]
+    );
+
+    // Update stock if finite
+    if (item.quantity > 0) {
+      item.quantity--;
+      if (item.quantity === 0) shop.items.splice(itemIndex, 1);
+      await db.query('UPDATE dms SET shops = $1 WHERE id = $2', [JSON.stringify(shops), req.dmId]);
+    }
+
+    broadcastCharacterUpdate(req.dmUsername, characterId);
+    res.json({ ok: true, currency });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // --- Notes ---
 app.get('/api/notes', authDM, async (req, res) => {
   try {
