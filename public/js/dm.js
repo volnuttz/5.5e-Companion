@@ -19,16 +19,6 @@ const SKILL_ABILITIES = [
   { name: 'Survival',        ability: 'WIS' }
 ];
 
-function getProficiencyBonus() {
-  const level = parseInt(document.getElementById('f-level')?.value) || 1;
-  return Math.ceil(level / 4) + 1;
-}
-
-function getAbilityMod(ability) {
-  const score = parseInt(document.getElementById(`f-${ability}`)?.value) || 10;
-  return Math.floor((score - 10) / 2);
-}
-
 function calcProfBonus(level) {
   return Math.ceil(level / 4) + 1;
 }
@@ -343,11 +333,18 @@ function autoSetHP() {
 
 // --- Features DB ---
 async function loadFeaturesDB() {
-  const [featsRes, traitsRes, classRes] = await Promise.all([
-    fetch('/api/feats'),
-    fetch('/api/species-traits'),
-    fetch('/api/class-features')
-  ]);
+  let featsRes, traitsRes, classRes;
+  try {
+    [featsRes, traitsRes, classRes] = await Promise.all([
+      fetch('/api/feats'),
+      fetch('/api/species-traits'),
+      fetch('/api/class-features')
+    ]);
+    if (!featsRes.ok || !traitsRes.ok || !classRes.ok) throw new Error('HTTP error loading features');
+  } catch (e) {
+    console.error('Failed to load features data:', e);
+    return;
+  }
   const feats = await featsRes.json();
   const speciesTraits = await traitsRes.json();
   const classFeatures = await classRes.json();
@@ -484,8 +481,13 @@ function renderSelectedFeatures() {
 
 // --- Spells DB ---
 async function loadSpellsDB() {
-  const res = await fetch('/api/spells');
-  allSpells = await res.json();
+  try {
+    const res = await fetch('/api/spells');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    allSpells = await res.json();
+  } catch (e) {
+    console.error('Failed to load spells data:', e);
+  }
 }
 
 function filterSpells() {
@@ -830,15 +832,28 @@ async function saveCharacter(e) {
 }
 
 async function deleteCharacter(id) {
-  if (!await dialogConfirm('Delete this character?', 'Delete Character')) return;
+  const isClaimed = currentSession && currentSession.characters[id]?.claimedBy;
+  const msg = isClaimed
+    ? 'This character is currently claimed by a player. Deleting it will remove them from the session. Continue?'
+    : 'Delete this character?';
+  if (!await dialogConfirm(msg, 'Delete Character')) return;
   await db.deleteCharacter(id);
+  if (currentSession && currentSession.characters[id]) {
+    delete currentSession.characters[id];
+    renderBattlefieldCharacters();
+  }
   loadCharacters();
 }
 
 // --- Equipment DB & Picker ---
 async function loadEquipmentDB() {
-  const res = await fetch('/api/equipment');
-  allEquipment = await res.json();
+  try {
+    const res = await fetch('/api/equipment');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    allEquipment = await res.json();
+  } catch (e) {
+    console.error('Failed to load equipment data:', e);
+  }
 }
 
 function filterEquipment() {
@@ -917,8 +932,9 @@ function collectEquipment() {
 
 // --- Sessions (PeerJS) ---
 async function createSession() {
-  const pin = prompt('Set a PIN for players to join (min 3 characters):');
-  if (!pin || pin.length < 3) { dialogAlert('PIN must be at least 3 characters.', 'Invalid PIN', 'error'); return; }
+  const pin = await dialogPrompt('Set a PIN for players to join (min 3 characters, alphanumeric):', 'Start Session');
+  if (!pin) return;
+  if (pin.length < 3) { dialogAlert('PIN must be at least 3 characters.', 'Invalid PIN', 'error'); return; }
   if (!/^[a-zA-Z0-9]+$/.test(pin)) { dialogAlert('PIN must be alphanumeric.', 'Invalid PIN', 'error'); return; }
 
   await db.savePin(pin);
@@ -1089,6 +1105,19 @@ async function showQR() {
   document.getElementById('qr-modal').classList.add('active');
 }
 
+function copySessionUrl() {
+  const url = document.getElementById('qr-url').textContent;
+  if (!url) return;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.getElementById('btn-copy-url');
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = orig; }, 2000);
+  }).catch(() => {
+    dialogAlert('Could not copy URL. Please copy it manually.', 'Copy Failed', 'warn');
+  });
+}
+
 // Broadcast character update to connected player
 async function broadcastCharacterToPlayer(characterId) {
   if (!dmPeer) return;
@@ -1102,8 +1131,14 @@ async function broadcastCharacterToPlayer(characterId) {
 let _bfUid = 0;
 
 async function loadMonstersDB() {
-  const res = await fetch('/api/monsters');
-  allMonsters = await res.json();
+  try {
+    const res = await fetch('/api/monsters');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    allMonsters = await res.json();
+  } catch (e) {
+    console.error('Failed to load monsters data:', e);
+    return;
+  }
 
   const types = [...new Set(allMonsters.map(m => m.type).filter(Boolean))].sort();
   const typeSelect = document.getElementById('monster-type-filter');
